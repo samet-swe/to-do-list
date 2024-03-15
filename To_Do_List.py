@@ -26,10 +26,12 @@ _tabbg2 = 'gray40'
 
 _style_code_ran = 0
 
+# Load DB info so changes in the future only require changing one place.]
+
 db_name = "to_do_list"
 db_host = "localhost"
 db_user = "postgres"
-db_passwd = 
+db_passwd = ""
 db_port = "5432"
 
 def _style_code():
@@ -68,9 +70,64 @@ class mainWindow:
         #                                            -removeActivityClick
         # Save changes to selected activity       btn_save
         #                                            -saveClick
-    
+
+        def check_exists():
+            # check if the database exists and return True/False
+            does_exist = False
+            
+            try:
+                conn = psycopg2.connect(host=db_host, user=db_user, password=db_passwd, port=db_port)
+                cursor = conn.cursor()
+                
+                cursor.execute("SELECT exists(SELECT datname FROM pg_catalog.pg_database WHERE datname = '{}')".format(db_name))
+                does_exist = cursor.fetchone()[0]   
+                            
+                cursor.close()
+                conn.close()
+                
+            except(Exception, psycopg2.DatabaseError) as error:
+                print(error)
+            
+            return(does_exist)
+        
+        def create_db():
+            # create the database and two tables
+            conn = psycopg2.connect(host = db_host,
+                                    user = db_user,
+                                    password = db_passwd,
+                                    port = db_port)
+            conn.autocommit = True
+            cursor = conn.cursor()
+                
+            try:
+                cursor.execute("CREATE DATABASE {} WITH OWNER = postgres ENCODING = 'UTF8' LC_COLLATE = 'English_United States.1252' LC_CTYPE = 'English_United States.1252' LOCALE_PROVIDER = 'libc' TABLESPACE = pg_default CONNECTION LIMIT = -1 IS_TEMPLATE = False;".format(db_name))
+                cursor.close()
+                conn.close()
+                conn2 = psycopg2.connect(database = db_name,
+                                         host = db_host,
+                                         user = db_user,
+                                         password = db_passwd,
+                                         port = db_port)
+                conn2.autocommit = True
+                cursor2 = conn2.cursor()
+                cursor2.execute('CREATE TABLE IF NOT EXISTS public.list_names(list_id integer NOT NULL GENERATED ALWAYS AS IDENTITY ( CYCLE INCREMENT 1 START 1 MINVALUE 1 MAXVALUE 2147483647 CACHE 1 ), names text COLLATE pg_catalog."default" NOT NULL, CONSTRAINT list_names_pkey PRIMARY KEY (list_id))')
+                cursor2.execute('CREATE TABLE IF NOT EXISTS public.list_activities(list_id integer NOT NULL, completed boolean DEFAULT false, activity_name text COLLATE pg_catalog."default" NOT NULL, notes text COLLATE pg_catalog."default" DEFAULT \'None\'::text, CONSTRAINT list_activities_pkey PRIMARY KEY (list_id, activity_name), CONSTRAINT "List_Index" FOREIGN KEY (list_id) REFERENCES public.list_names (list_id) MATCH SIMPLE ON UPDATE CASCADE ON DELETE CASCADE)')
+                cursor2.close()
+                conn2.close()
+            except (psycopg2.DatabaseError, Exception) as error:
+                print(error)
+                    
+            cursor.close()
+            conn.close()
+
+                
         def load_lists():
             #This function loads the list names to the screen
+            db_exists = check_exists()
+            
+            if db_exists == False:
+                create_db()
+                                
             conn = psycopg2.connect(database = db_name,
                                     host = db_host,
                                     user = db_user,
@@ -89,7 +146,8 @@ class mainWindow:
         
             if self.lbox_listNames:
                 self.lbox_listNames.configure(listvariable = var)
-        
+
+            cursor.close()
             conn.close()
         
         def load_activities():
@@ -105,21 +163,23 @@ class mainWindow:
                 txt_string = self.lbl_list.cget("text")
                 list_name = txt_string.split(": ")
                 selectedList = list_name[1]
-
-                cursor.execute("SELECT list_id FROM list_names WHERE names = '{}'".format(selectedList))
-                ids = cursor.fetchone()
-                selectedId = ids[0]
-            
-                cursor.execute("SELECT activity_name FROM list_activities WHERE list_id = {}".format(selectedId))
-                activities = cursor.fetchall()
                 act_list = []
                 
-                for i in activities:
-                    act_list.append('{}'.format(i[0]))
-                    
+                if selectedList != '':
+                    cursor.execute("SELECT list_id FROM list_names WHERE names = '{}'".format(selectedList))
+                    ids = cursor.fetchone()
+                    selectedId = ids[0]
+            
+                    cursor.execute("SELECT activity_name FROM list_activities WHERE list_id = {}".format(selectedId))
+                    activities = cursor.fetchall()
+                
+                    for i in activities:
+                        act_list.append('{}'.format(i[0]))
+                        
                 var2 = tk.Variable(value=act_list)
                 self.lbox_displayList.configure(listvariable=var2)
         
+                cursor.close()
                 conn.close()
             
         def selectList(event):
@@ -143,8 +203,9 @@ class mainWindow:
             
             list_names = list(self.lbox_listNames.get(0, END))
             for i in list_names:
-                if i is newName:
+                if i == newName:
                     not_present = False
+                    self.txt_listName.delete('1.0', END)
                     break
                 else:
                     not_present = True
@@ -169,6 +230,7 @@ class mainWindow:
                 load_lists()
                 self.txt_listName.delete('1.0', END)
                 
+                cursor.close()
                 conn.close()
                 
         def deleteListClick():
@@ -184,7 +246,7 @@ class mainWindow:
                 cursor = conn.cursor()
                 
                 selectedIndex = indices[0]
-                selectedList = self.lbox_listNames.get(selectedIndex)[0]
+                selectedList = self.lbox_listNames.get(selectedIndex)
             
                 try:
                     cursor.execute("DELETE FROM list_names WHERE names = '{}'".format(selectedList))
@@ -195,7 +257,14 @@ class mainWindow:
                     pass
                     
                 self.lbox_listNames.delete(selectedIndex)
-            
+                self.lbl_list.configure(text='''Things To Do: ''')
+                load_activities()
+                if self.tch69.get() == 1:
+                    self.cb_completion.invoke()
+                self.txt_Activity.delete('1.0', END)
+                self.txt_notes.delete('1.0', END)
+                
+                cursor.close()
                 conn.close()
 
         def selectActivity(event):
@@ -228,6 +297,7 @@ class mainWindow:
                 self.txt_Activity.delete('1.0', END)
                 self.txt_Activity.insert('1.0', selectedActivity)
             
+                cursor.close()
                 conn.close()
 
         def addActivityClick():
@@ -237,8 +307,15 @@ class mainWindow:
             activity_names = list(self.lbox_displayList.get(0, END))
             if len(activity_names) > 0:
                 for i in activity_names:
-                    if i is newActivity:
+                    if i == newActivity:
                         not_present = False
+                        
+                        if self.tch69.get() == 1:
+                            self.cb_completion.invoke()
+                            
+                        self.txt_Activity.delete('1.0', END)
+                        self.txt_notes.delete('1.0', END)
+                        
                         break
                     else:
                         not_present = True
@@ -287,6 +364,7 @@ class mainWindow:
                     self.cb_completion.invoke()
                 self.txt_notes.delete('1.0', END)
                 
+                cursor.close()
                 conn.close()
                 
         def removeActivityClick():
@@ -319,6 +397,7 @@ class mainWindow:
                 self.txt_notes.delete('1.0', END)
                 self.txt_Activity.delete('1.0', END)
                 
+                cursor.close()
                 conn.close()
 
         def saveClick():
@@ -346,6 +425,7 @@ class mainWindow:
                 try:
                     completed = bool(self.tch69.get())
                     notes = self.txt_notes.get('1.0', 'end-1c')
+                    activity = self.txt_Activity.get('1.0', 'end-1c')
                                
                     cursor.execute("UPDATE list_activities SET completed = {}, notes = '{}' WHERE activity_name = '{}'".format(completed, notes, activity))
                     conn.commit()
@@ -353,7 +433,14 @@ class mainWindow:
                     print(error)
                 finally:
                     pass
+                
+                load_activities()
+                self.txt_Activity.delete('1.0', END)
+                if self.tch69.get() == 1:
+                    self.cb_completion.invoke()
+                self.txt_notes.delete('1.0', END)
                     
+                cursor.close()
                 conn.close()
         
         top.geometry("1024x851+251+100")
